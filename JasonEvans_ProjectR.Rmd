@@ -1,0 +1,195 @@
+---
+title: "JassonEvans_ProjectR"
+author: "Jason Evans"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(plotly)
+library(ggplot2)
+library(DT)
+library(nycflights13)
+library(tidyverse)
+library(tm)
+library(wordcloud)
+```
+
+
+
+```{r}
+
+#Here we filter days 1-90 into 30-day increments and rename, where:
+#A = Day 1-30 (PapM1)
+#B = Day 31-60 (PapM2)
+#C = Day 61-90 (PapM3)
+
+PapM1<-Pap_Data%>%
+  filter(Day < 31)%>%
+  rename('A'= AHI)
+  
+PapM2<-Pap_Data%>%
+  filter(Day > 30, Day < 61)%>%
+  rename('B'= AHI)
+
+PapM3<-Pap_Data%>%
+  filter(Day > 60, Day < 91)%>%
+  rename('C'= AHI)
+
+#We then take each of the above and create a data frame selecting only A, B, and C as defined in the notes above. 
+
+PapDF<-data.frame(PapM1,PapM2,PapM3)%>%
+  select(A,B,C)
+
+#In order to perform the statical-analysis below, we will need the long format for the data. We then collect the groups A, B, and C under a new header which we call 'Month' and store the AHI scores for each day under the new header which we call 'AHI Number.'
+
+NewPap<-PapDF%>%
+  gather(key = Month,value = AHI_Number,A,B,C)
+
+```
+
+```{r}
+#We claim that the mean AHI score over the first 90 days in less then the ideal mean AHI score of 5.
+#Let mu be the mean AHI score over the first 90 days of treatment. 
+#Ho: mu = 5
+#Ha: mu < 5
+
+t.test(Pap_Data$AHI, mu = 5, alternative = "less")
+
+
+AHIMean<- mean(Pap_Data$AHI)
+AHISD<- sd(Pap_Data$AHI)
+AHItstar<-qt(1-0.05/2, length(Pap_Data$AHI)-1)
+AHIse<-AHISD/sqrt(length(Pap_Data$AHI))
+
+x<-"First 90 Days of Treatment"
+y<-AHIMean
+myAHIdf<-data.frame(x,y)
+ggplot(data=myAHIdf, aes(x=x,y=y))+geom_point()+geom_errorbar(aes(ymin=y-AHIse*AHItstar, ymax=y+AHIse*AHItstar), width=0.3)+ylim(c(0,3.5))
+
+
+```
+
+
+```{r}
+
+#Comparing three mean AHI scores using a One-Way ANOVA. A One-Way ANOVA uses one independent variable.
+#There are three general assumptions of ANOVA:
+#1. The independence of observations. (No hidden relationships.)
+#2. Normally distributed response variable. (Values of the dependent variable have a normal distribution.)
+#3. Homogeneity of variance. (Variance among the groups is similar for every group.)
+
+#Month is the dependent variable.
+#The independent variable is the AHI score broken into three levels: Day 1-30, Day 31-60, Day 61-90 which represent the first 3 months of treatment.
+#For convenience, Let A =  Day 1-30 A, Day 31-60; B = Day 31-60; C = Day 61-90.
+
+#Let mu(A) be the mean AHI score for Day 1-30 (A).
+#Let mu(B) be the mean AHI score for Day 31-60 (B).
+#Let mu(C) be the mean AHI score for Day 60-90 (C).
+
+#Ho: mu(A) = mu(B) = mu(C) (There is not significant difference among group AHI means)
+#Ha: mu(A) != mu(B) != mu(C) (There is a significant difference in mean AHI score between at least two groups.)
+
+#NOTE: THE OUTPUT PROVIDES AN ESTIMATE OF HOW MUCH VARIATION IN THE DEPENDENT VARIABLE THAT CAN BE EXPLAINED BY THE INDEPENDENT VARIABLE.
+
+PapAnova <- aov(AHI_Number~Month, data = NewPap)
+summary(PapAnova)
+
+#The p-value is .0000000000000002 and the significance level is 0.05 so that p-value < alpha and we REJECT THE NULL HYPOTHESIS. 
+#There is sufficient evidence that there is a significant difference in mean AHI scores between at least two of the groups.
+
+```
+
+
+
+```{r}
+#The above One-Way ANOVA conclusion tells us that there is a significant difference in AT LEAST two of the mean AHI score groups. In order to investigate whether there is a significant difference between A-B, A-C, or B-C we perform a TukeyHSD Post-hoc Test. 
+#(Tukey's Honestly-Significant Difference Post-hoc Test)
+
+#Note: This test runs pairwise comparisons among each of the three groups A, B, and C and uses a conservative error estimate to find the groups which are statistically different from one another. 
+
+TukeyHSD(PapAnova)
+
+#There is a significant difference between mean AHI scores of Day 1-30 (A) and Day 31-60 (B). (p-value = 0)
+#There is a significant difference between mean AHI scores of Day 1-30 (B) and Day 61-90 (C). (p-value = 0)
+#There is NOT a significant difference between mean AHI scores of Day 31-60 (B) and Day 61-90 (C). (p-value = .3052937)
+
+```
+
+
+
+```{r}
+NPP2<-NewPap%>%
+  group_by(Month)%>%
+  summarise(AvgAHI=mean(AHI_Number),se=sd(AHI_Number)/sqrt(length(AHI_Number)),tstar=qt(1-0.05/2,length(AHI_Number)-1))
+NPP2
+
+ggplot(data=NPP2,aes(x=Month, y=AvgAHI)) +
+  geom_point(color = "red") +
+  geom_errorbar(aes(ymin= AvgAHI-tstar*se, ymax=AvgAHI+tstar*se)) +
+  ylim(c(0,7)) +
+  labs(x="The First 90 Days of Treatment", y="Apnea-Hypopnea Index", title="95% Confidence Intervals for the First 90 Days of Treatment") +
+  scale_x_discrete(labels=c("Day 1-30","Day 31-60","Day 61-90"))
+
+```
+
+
+
+```{r}
+#The Five-Number Summary for the groups A, B, and C, with the outliers in red.
+
+Five<-ggplot(data=NewPap,aes(x=Month,y=AHI_Number)) + 
+  geom_boxplot(fill="white",color="black",outlier.color ="red") +
+  ylim(c(-.5,13)) +
+  labs(x="The First 90 Days of Treatment", y="Apnea-Hypopnea Index", title="The 5-Number Summary for the First 90 Days of Treatment") +
+  scale_x_discrete(labels=c("Day 1-30","Day 31-60","Day 61-90"))
+Five
+
+#Interactive plot in order to get the 5-Number Summary 
+#ggplotly(Five)
+
+#For Group A:
+#Lower = 1.9, Q1 = 3.9, Median = 4.7, Q3 = 6.2, Upper = 8.6, Upper Outliers = 11.6, 13
+
+#For Group B:
+#Lower = 0.6, Q1 = 0.9, Median = 1.6, Q3 = 2.1, Upper = 3.4
+
+#For Group C:
+#Lower = 0.3, Q1 = 0.8, Median = 0.9, Q3 = 1.2, Upper = 2.8, Upper Outliers = 2.1, 2.8
+
+
+
+```
+
+
+
+```{r}
+tukey.plot.aov<-aov(AHI_Number~Month, data = NewPap)
+tukey.plot.test<-TukeyHSD(tukey.plot.aov)
+plot(tukey.plot.test,col = "red",las = '1')
+grid()
+```
+
+
+```{r}
+mean.ahi.data<-NewPap%>%
+  group_by(Month)%>%
+  summarise(AHIMean = mean(AHI_Number))
+mean.ahi.data
+
+two.way.plot<-ggplot(NewPap,aes(x = Month, y = AHI_Number, group = Month)) +
+  geom_point(cex = 1.5, pch = 1.0,position = position_jitter(w = 0.1, h = 0))
+
+
+two.way.plot <- two.way.plot +
+  stat_summary(fun.data = 'mean_se', geom = 'errorbar', width = 0.2, color="red") +
+  stat_summary(fun.data = 'mean_se', geom = 'pointrange', color="red") +
+  geom_point(data=mean.ahi.data, aes(x = Month, y = AHIMean))
+two.way.plot
+
+```
+
